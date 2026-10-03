@@ -1,0 +1,84 @@
+name: TEST aggregate refusal
+on:
+  workflow_dispatch:
+    inputs:
+      fault:
+        type: choice
+        required: true
+        options: [failure, skipped]
+permissions:
+  contents: read
+jobs:
+  quick:
+    if: ${{ inputs.fault != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Inject synthetic required-lane failure
+        run: exit 1
+  foundation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - run: "true"
+  architecture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - run: "true"
+  docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - run: "true"
+  product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - run: "true"
+  check:
+    if: ${{ always() }}
+    needs: [quick, foundation, architecture, docs, product]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: .node-version
+      - name: Verify tested revision
+        env:
+          EXPECTED_REVISION: ${{ github.workflow_sha }}
+        run: node scripts/ci/gate.ts revision
+      - name: Retain exact source hashes
+        run: sha256sum scripts/ci/gate.ts scripts/ci/policy.ts scripts/ci/script-routing.ts
+      - name: Require all actual GitHub lane results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/ci/gate.ts aggregate
+  verify-refusal:
+    if: ${{ always() }}
+    needs: [quick, foundation, architecture, docs, product, check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Confirm exact injected result and aggregate refusal
+        env:
+          FAULT: ${{ inputs.fault }}
+          QUICK: ${{ needs.quick.result }}
+          CHECK: ${{ needs.check.result }}
+          FOUNDATION: ${{ needs.foundation.result }}
+          ARCHITECTURE: ${{ needs.architecture.result }}
+          DOCS: ${{ needs.docs.result }}
+          PRODUCT: ${{ needs.product.result }}
+        run: |
+          test "$QUICK" = "$FAULT"
+          test "$CHECK" = failure
+          test "$FOUNDATION" = success
+          test "$ARCHITECTURE" = success
+          test "$DOCS" = success
+          test "$PRODUCT" = success
+          printf 'Verified injected=%s aggregate=%s other-required=success\n' "$QUICK" "$CHECK"

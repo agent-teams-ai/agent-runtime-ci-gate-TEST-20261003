@@ -1,0 +1,5 @@
+{
+  "name": "agent-runtime-ci-gate-test",
+  "private": true,
+  "type": "module"
+}
